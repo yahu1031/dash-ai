@@ -1,13 +1,13 @@
 import { ContentEmbedding, GoogleGenerativeAI, TaskType } from "@google/generative-ai";
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as vscode from "vscode";
-import * as crypto from 'crypto';
-import path = require("path");
+import { extractReferenceTextFromEditor } from "../utilities/code-processing";
 import { appendReferences } from "../utilities/prompt_helpers";
 import { getReferenceEditor } from "../utilities/state-objects";
-import { GenerationRepository } from "./generation-repository";
-import { extractReferenceTextFromEditor } from "../utilities/code-processing";
 import { logError } from "../utilities/telemetry-reporter";
+import { GenerationRepository } from "./generation-repository";
+import path = require("path");
 
 function handleError(error: Error, userFriendlyMessage: string): never {
     console.error(error);
@@ -60,17 +60,33 @@ export class GeminiRepository extends GenerationRepository {
             throw Error('Input prompt exceeds the maximum token limit.');
         }
 
-        const chat = this.genAI.getGenerativeModel({ model: "gemini-pro", generationConfig: { temperature: 0.0, topP: 0.2 } }).startChat(
-            {
-                history: prompt, generationConfig: {
-                    maxOutputTokens: 2048,
-                },
+        var text = '';
+        try {
+            const chat = this.genAI.getGenerativeModel({ model: "gemini-pro", generationConfig: { temperature: 0.0, topP: 0.2 } }).startChat(
+                {
+                    history: prompt, generationConfig: {
+                        maxOutputTokens: 2048,
+                    },
+                }
+            );
+            const lastMsgPart = lastMessage?.parts ?? "";
+            var result;
+            if (lastMsgPart.length > 0) {
+                result = await chat.sendMessage(lastMsgPart);
+            } else {
+                return 'Please provide a valid prompt';
             }
-        );
-        const result = await chat.sendMessage(lastMessage?.parts ?? "");
 
-        const response = result.response;
-        const text = response.text();
+            const response = result.response;
+            text = response.text();
+        } catch (error: any) {
+            // if error.message contains "GoogleGenerativeAI Error", then trim the message to get the actual error message.
+            if (error.message.includes("GoogleGenerativeAI Error")) {
+                text = error.message.split("Error]:")[1].trim();
+            } else {
+                text = error.message;
+            }
+        }
         console.log('gemini response', text);
         return text;
     }
